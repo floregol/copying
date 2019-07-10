@@ -19,11 +19,11 @@ NUM_CROSS_VAL = 1
 trials = 5
 CORES = 4
 # Train the GCN
-SEED = 5
+SEED = 2
 initial_num_labels = 20
 new_positions = 10
-num_attacked_nodes = 10
-dataset = 'cora'
+num_attacked_nodes = 50
+dataset = 'citeseer'
 adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
 
 ground_truth = np.argmax(labels, axis=1)
@@ -71,9 +71,9 @@ for train_index, test_index in test_split.split(labels, labels):
             node_thinking_label = full_pred_gcn[node_index]
 
             list_new_posititons = sample_new_pos(new_positions, z, node_index)
-            print('node_true_label ' + str(node_true_label))
-            print('node_thinking_label ' + str(node_thinking_label))
-            print('list_new_posititons ' + str(ground_truth[list_new_posititons]))
+            # print('node_true_label ' + str(node_true_label))
+            # print('node_thinking_label ' + str(node_thinking_label))
+            # print('list_new_posititons ' + str(ground_truth[list_new_posititons]))
 
             def move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1, node_features):
                 i = 0
