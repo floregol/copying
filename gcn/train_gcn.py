@@ -9,9 +9,7 @@ from gcn.models import GCN, MLP
 import os
 from scipy import sparse
 
-
 QUICK_MODE = False
-
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -29,21 +27,14 @@ flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of e
 flags.DEFINE_integer('max_degree', 3, 'Maximum Chebyshev polynomial degree.')
 
 
-def get_trained_gcn(seed, dataset, y_train, y_val, y_test, train_mask, val_mask, test_mask):
+def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_mask, val_mask, test_mask, VERBOSE=False):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '6'
     # Set random seed
     seed = seed
     np.random.seed(seed)
     tf.set_random_seed(seed)
 
-    # Settings
-
-    VERBOSE = False
-    # Load data
-    adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
-
     # Some preprocessing
-    features_sparse = preprocess_features(initial_features)
     features = sparse_to_tuple(features_sparse)
 
     support = [preprocess_adj(adj)]
@@ -60,9 +51,9 @@ def get_trained_gcn(seed, dataset, y_train, y_val, y_test, train_mask, val_mask,
         'num_features_nonzero':
             tf.placeholder(tf.int32)  # helper variable for sparse dropout
     }
-
+    input_dim = features[2][1]
     # Create model
-    model = model_func(placeholders, input_dim=features[2][1], logging=True)
+    model = model_func(placeholders, input_dim=input_dim, logging=True)
 
     # Initialize session
     sess = tf.Session()
@@ -80,6 +71,10 @@ def get_trained_gcn(seed, dataset, y_train, y_val, y_test, train_mask, val_mask,
         feed_dict_val = construct_feed_dict(features, support, y_train, train_mask, placeholders)
         all_softamx_output, _, _ = sess.run([model.softmax_ouput, model.loss, model.accuracy], feed_dict=feed_dict_val)
         return all_softamx_output
+
+    def close_session():
+        sess.close()
+        tf.reset_default_graph()
 
     # Init variables
     sess.run(tf.global_variables_initializer())
@@ -117,9 +112,13 @@ def get_trained_gcn(seed, dataset, y_train, y_val, y_test, train_mask, val_mask,
     print("Test set results:", "cost=", "{:.5f}".format(test_cost), "accuracy=", "{:.5f}".format(test_acc), "time=",
           "{:.5f}".format(test_duration))
 
-    w_0 = sess.run(model.vars['gcn/graphconvolution_1_vars/weights_0:0'])
-    w_1 = sess.run(model.vars['gcn/graphconvolution_2_vars/weights_0:0'])
+    for w in tf.trainable_variables():
+
+        if w.shape[0] == input_dim:
+            w_0 = sess.run(model.vars[w.name])
+        else:
+            w_1 = sess.run(model.vars[w.name])
+
     A_tilde = support
 
-    return w_0, w_1, A_tilde, softmax
-
+    return w_0, w_1, A_tilde, softmax, close_session
