@@ -9,23 +9,30 @@ from gvae.GVAE import get_z_embedding
 from sklearn.model_selection import StratifiedShuffleSplit
 from helper import *
 from attacks import poison_adj_DICE_attack
-import multiprocess as mp
+# import multiprocess as mp
 """
 
  Moving the nodes around experiment
 
 """
 NUM_CROSS_VAL = 1
-trials = 5
+trials = 2
 #CORES = 4
-SEED = 2
+SEED = 123
+np.random.seed(SEED)
 initial_num_labels = 20
 new_positions = 10
 num_attacked_nodes = 50
-dataset = 'citeseer'
+dataset = 'cora'
 adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
 
 ground_truth = np.argmax(labels, axis=1)
+
+K = np.max(ground_truth) + 1
+communities = {}
+for k in range(K):
+    communities[k] = np.where(ground_truth == k)[0]
+
 features_sparse = preprocess_features(initial_features)
 feature_matrix = features_sparse.todense()
 n = feature_matrix.shape[0]
@@ -33,20 +40,28 @@ number_labels = labels.shape[1]
 
 test_split = StratifiedShuffleSplit(n_splits=NUM_CROSS_VAL, test_size=0.37, random_state=SEED)
 test_split.get_n_splits(labels, labels)
-seed_list = range(0, trials)
+seed_list = np.random.randint(1, 1e6, trials)
 
 for train_index, test_index in test_split.split(labels, labels):
 
     y_train, y_val, y_test, train_mask, val_mask, test_mask = get_split(n, train_index, test_index, labels,
                                                                         initial_num_labels)
 
+    acc_old_list = np.zeros(trials)
+    acc_new_list = np.zeros(trials)
+
     for trial in range(trials):
         seed = seed_list[trial]
+
+        np.random.seed(seed)  # set the seed for current trial
+        random.seed(seed)
+
+        print('trial : ' + str(trial))
 
         """
         First, corrupt the adjacency matrix for a a fixed number of randomly sleected nodes from the test set.
         """
-        attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, num_attacked_nodes, test_index)
+        attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes, test_index)
 
         full_A_tilde = preprocess_adj(attacked_adj, True)
 
@@ -57,7 +72,7 @@ for train_index, test_index in test_split.split(labels, labels):
                                                              y_test, train_mask, val_mask, test_mask)
 
         # Get prediction by the GCN
-        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))
+        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse)) # could you explain this?
         
         full_pred_gcn = np.argmax(initial_gcn, axis=1)
         new_pred = deepcopy(full_pred_gcn)
@@ -155,6 +170,13 @@ for train_index, test_index in test_split.split(labels, labels):
             j += 1
         close()
 
-        print("ACC old pred : " + str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
+        acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
+        acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
 
-        print("ACC soft  pred : " + str(accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])))
+        print("ACC old pred : " + str(acc_old_list[trial]))
+
+        print("ACC new pred : " + str(acc_new_list[trial]))
+
+
+print('Mean and std. error of GCN accuracy at attacked nodes : {} and {}'.format(np.mean(acc_old_list)*100, np.std(acc_old_list)*100))
+print('Mean and std. error of Copying model accuracy at attacked nodes : {} and {}'.format(np.mean(acc_new_list)*100, np.std(acc_new_list)*100))

@@ -8,7 +8,7 @@ def sample_new_pos(m, z, node_index):
     pairwise = rbf_kernel(z)
 
     np.fill_diagonal(pairwise, 0)
-    p = np.power(pairwise[node_index, :], 3) / np.sum(np.power(pairwise[node_index, :], 3))
+    p = np.power(pairwise[node_index, :], 3) / np.sum(np.power(pairwise[node_index, :], 3)) # will have to try the other distance later
   
     s = np.random.choice(range(0, p.shape[0]), m, p=p)
     
