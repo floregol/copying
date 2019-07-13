@@ -5,7 +5,7 @@ from scipy import sparse
 import math
 
 
-def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, percent_corruption_neighbors=0.5):
+def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, percent_corruption_neighbors):
     random.seed(seed)
     attack_adj = deepcopy(adj).todense()
     nodes_to_corrupt = random.sample(list(list_test_nodes), m)
@@ -21,5 +21,18 @@ def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, p
         new_neighbors = random.sample(list(np.setdiff1d(range(adj.shape[0]), communities[label])), num_remove_neighbors)
         attack_adj[n, new_neighbors] = 1
         attack_adj[new_neighbors, n] = 1
+
+    return sparse.csr_matrix(attack_adj), nodes_to_corrupt
+
+
+def poison_adj_DISCONNECTING_attack(seed, adj, m, list_test_nodes):
+    random.seed(seed)
+    attack_adj = deepcopy(adj).todense()
+    nodes_to_corrupt = random.sample(list(list_test_nodes), m)
+
+    for n in nodes_to_corrupt:
+
+        attack_adj[n, :] = 0
+        attack_adj[:, n] = 0
 
     return sparse.csr_matrix(attack_adj), nodes_to_corrupt

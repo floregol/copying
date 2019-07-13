@@ -80,7 +80,7 @@ def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_ma
     sess.run(tf.global_variables_initializer())
 
     cost_val = []
-    print("Training the GCN with Kipf values....")
+    # print("Training the GCN with Kipf values....")
     # Train model
     for epoch in range(FLAGS.epochs):
 
@@ -105,7 +105,7 @@ def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_ma
             print("Early stopping...")
             break
 
-    print("Optimization Finished!")
+    # print("Optimization Finished!")
 
     # Testing
     test_cost, test_acc, test_duration = evaluate(features, support, y_test, test_mask, placeholders)

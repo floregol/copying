@@ -1,29 +1,48 @@
 import time
 from utils import load_data, preprocess_adj, preprocess_features, sparse_to_tuple
 import numpy as np
+import scipy as sp
+import scipy.stats
 from gcn.train_gcn import get_trained_gcn
 from copy import copy, deepcopy
 from sklearn.metrics import accuracy_score
-from sampler import sample_new_pos
+from scipy.sparse import csr_matrix
+from sampler import *
 from gvae.GVAE import get_z_embedding
 from sklearn.model_selection import StratifiedShuffleSplit
 from helper import *
-from attacks import poison_adj_DICE_attack
+from attacks import *
 # import multiprocess as mp
 """
 
  Moving the nodes around experiment
 
 """
-NUM_CROSS_VAL = 1
-trials = 2
-#CORES = 4
+trials = 50
+dataset = 'cora'
+dice_attack = True
+percent_corruption_neighbors = 0.5
+
+num_attacked_nodes = 50
+new_positions = 10
+
+initial_num_labels = 20
+
 SEED = 123
 np.random.seed(SEED)
-initial_num_labels = 20
-new_positions = 10
-num_attacked_nodes = 50
-dataset = 'cora'
+
+NUM_CROSS_VAL = 1
+#CORES = 4
+
+print('The datset is : ' + str(dataset))
+print('Number of attacked nodes : ' + str(num_attacked_nodes))
+print('Number of nodes for copying at each of attacked nodes : ' + str(new_positions))
+print('Dice attack is : ' + str(dice_attack))
+if dice_attack:
+    print('Percentage of neighbours corrupted : ' + str(100*percent_corruption_neighbors))
+else:
+    print('The attacked nodes are entirely disconnected')
+
 adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
 
 ground_truth = np.argmax(labels, axis=1)
@@ -47,21 +66,27 @@ for train_index, test_index in test_split.split(labels, labels):
     y_train, y_val, y_test, train_mask, val_mask, test_mask = get_split(n, train_index, test_index, labels,
                                                                         initial_num_labels)
 
+    N = len(y_train)
+
     acc_old_list = np.zeros(trials)
     acc_new_list = np.zeros(trials)
+    acc_new_majority_list = np.zeros(trials)
 
     for trial in range(trials):
         seed = seed_list[trial]
 
         np.random.seed(seed)  # set the seed for current trial
         random.seed(seed)
-
+        print('========================================================================================================')
         print('trial : ' + str(trial))
 
         """
         First, corrupt the adjacency matrix for a a fixed number of randomly sleected nodes from the test set.
         """
-        attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes, test_index)
+        if dice_attack:
+            attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes, test_index, percent_corruption_neighbors)
+        else:
+            attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
 
         full_A_tilde = preprocess_adj(attacked_adj, True)
 
@@ -72,18 +97,22 @@ for train_index, test_index in test_split.split(labels, labels):
                                                              y_test, train_mask, val_mask, test_mask)
 
         # Get prediction by the GCN
-        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse)) # could you explain this?
+        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))  # could you explain this?
         
         full_pred_gcn = np.argmax(initial_gcn, axis=1)
-        new_pred = deepcopy(full_pred_gcn)
-        print("ACC old pred at attacked nodes: " +
-              str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
 
+        new_pred = deepcopy(full_pred_gcn)
+        new_pred_majority = deepcopy(full_pred_gcn)
+
+        print("ACC old pred at attacked nodes: " + str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
 
         """
         Get the embeddings of all the nodes
         """
         z = get_z_embedding(attacked_adj, features_sparse, labels, seed, verbose=False)
+
+        dist = compute_euclidean_distance(z)
+
         j = 0
 
         """
@@ -97,7 +126,8 @@ for train_index, test_index in test_split.split(labels, labels):
             node_true_label = ground_truth[node_index]
             node_thinking_label = full_pred_gcn[node_index]
 
-            list_new_posititons = sample_new_pos(new_positions, z, node_index)
+            # list_new_posititons = sample_new_pos(new_positions, z, node_index)
+            list_new_posititons = get_new_pos(new_positions, dist, node_index)
 
             # print('node_true_label ' + str(node_true_label))
             # print('node_thinking_label ' + str(node_thinking_label))
@@ -106,7 +136,8 @@ for train_index, test_index in test_split.split(labels, labels):
 
             def move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1, node_features):
                 i = 0
-                softmax_output_list = np.zeros((len(list_new_posititons), number_labels))
+                softmax_output_list = np.zeros((new_positions, number_labels))
+                obtained_labels_list = np.zeros(new_positions)
                 for new_spot in list_new_posititons:
                     replaced_node_label = ground_truth[new_spot]
                     saved_features = deepcopy(
@@ -117,19 +148,18 @@ for train_index, test_index in test_split.split(labels, labels):
                     softmax_output_of_node = fast_localized_softmax(feature_matrix, new_spot, full_A_tilde, w_0,
                                                                     w_1)  # get new softmax output at this position
 
-                    l = np.argmax(softmax_output_of_node)
+                    obt_label = np.argmax(softmax_output_of_node)
 
                     softmax_output_list[i] = softmax_output_of_node
+                    obtained_labels_list[i] = obt_label
                     i += 1
 
                     feature_matrix[new_spot] = saved_features  # undo changes on the feature matrix
-                return softmax_output_list
+                return softmax_output_list, obtained_labels_list
 
             #To store results
-            softmax_output_list = move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1,
+            softmax_output_list, obtained_labels_list = move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1,
                                             node_features)
-
-
 
             # partition_size = int(len(list_new_posititons) / CORES)
 
@@ -159,24 +189,36 @@ for train_index, test_index in test_split.split(labels, labels):
             """
             y_bar_x = np.mean(softmax_output_list, axis=0)
             new_label = np.argmax(y_bar_x, axis=0)
-           
-           
+            new_label_majority = sp.stats.mode(obtained_labels_list)[0]
+
             # print(new_label)
             # print(new_label)
             #  print(str(node_true_label) + " pred " + str(node_thinking_label) + " new : " + str(new_label))
 
             new_pred[node_index] = new_label
+            new_pred_majority[node_index] = new_label_majority
 
             j += 1
         close()
 
         acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
         acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
+        acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
 
         print("ACC old pred : " + str(acc_old_list[trial]))
 
-        print("ACC new pred : " + str(acc_new_list[trial]))
+        print("ACC new pred (avg. softmax) : " + str(acc_new_list[trial]))
+
+        print("ACC new pred (majority vote) : " + str(acc_new_majority_list[trial]))
 
 
 print('Mean and std. error of GCN accuracy at attacked nodes : {} and {}'.format(np.mean(acc_old_list)*100, np.std(acc_old_list)*100))
-print('Mean and std. error of Copying model accuracy at attacked nodes : {} and {}'.format(np.mean(acc_new_list)*100, np.std(acc_new_list)*100))
+print('Mean and std. error of Copying model accuracy at attacked nodes  (avg. softmax) : {} and {}'.format(np.mean(acc_new_list)*100, np.std(acc_new_list)*100))
+print('Mean and std. error of Copying model accuracy at attacked nodes  (majority vote) : {} and {}'.format(np.mean(acc_new_majority_list)*100, np.std(acc_new_majority_list)*100))
+
+_, p_value = sp.stats.wilcoxon(acc_old_list, acc_new_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (avg. softmax): ' + str(p_value))
+
+_, p_value_majority = sp.stats.wilcoxon(acc_old_list, acc_new_majority_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (majority vote): ' + str(p_value_majority))
+

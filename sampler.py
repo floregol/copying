@@ -18,3 +18,19 @@ def sample_new_pos(m, z, node_index):
     # plt.plot(p[order[s]], 'o')
     # plt.show()
     return np.arange(0,z.shape[0], 1)[order][-m:]
+
+
+def get_new_pos(m, dist, node_index):
+
+    order = np.argsort(dist[node_index])
+
+    return order[1:m+1]
+
+
+def compute_euclidean_distance(embed):
+
+    N = embed.shape[0]
+    p = np.dot(embed, np.transpose(embed))
+    q = np.matlib.repmat(np.diag(p), N, 1)
+    dist = q + np.transpose(q) - 2 * p
+    return dist
