@@ -34,6 +34,7 @@ np.random.seed(SEED)
 NUM_CROSS_VAL = 1
 #CORES = 4
 
+print('========================================================================================================')
 print('The datset is : ' + str(dataset))
 print('Number of attacked nodes : ' + str(num_attacked_nodes))
 print('Number of nodes for copying at each of attacked nodes : ' + str(new_positions))
@@ -42,6 +43,8 @@ if dice_attack:
     print('Percentage of neighbours corrupted : ' + str(100*percent_corruption_neighbors))
 else:
     print('The attacked nodes are entirely disconnected')
+
+print('Number of trials : ' + str(trials))
 
 adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
 
@@ -69,6 +72,10 @@ for train_index, test_index in test_split.split(labels, labels):
     N = len(y_train)
 
     acc_old_list = np.zeros(trials)
+
+    acc_new_no_copy_list = np.zeros(trials)
+    acc_new_no_copy_majority_list = np.zeros(trials)
+
     acc_new_list = np.zeros(trials)
     acc_new_majority_list = np.zeros(trials)
 
@@ -97,9 +104,13 @@ for train_index, test_index in test_split.split(labels, labels):
                                                              y_test, train_mask, val_mask, test_mask)
 
         # Get prediction by the GCN
-        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))  # could you explain this?
+        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))
         
         full_pred_gcn = np.argmax(initial_gcn, axis=1)
+
+        gcn_softmax = deepcopy(initial_gcn)
+        new_pred_no_copy = deepcopy(full_pred_gcn)
+        new_pred_majority_no_copy = deepcopy(full_pred_gcn)
 
         new_pred = deepcopy(full_pred_gcn)
         new_pred_majority = deepcopy(full_pred_gcn)
@@ -137,7 +148,6 @@ for train_index, test_index in test_split.split(labels, labels):
             def move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1, node_features):
                 i = 0
                 softmax_output_list = np.zeros((new_positions, number_labels))
-                obtained_labels_list = np.zeros(new_positions)
                 for new_spot in list_new_posititons:
                     replaced_node_label = ground_truth[new_spot]
                     saved_features = deepcopy(
@@ -151,10 +161,10 @@ for train_index, test_index in test_split.split(labels, labels):
                     obt_label = np.argmax(softmax_output_of_node)
 
                     softmax_output_list[i] = softmax_output_of_node
-                    obtained_labels_list[i] = obt_label
                     i += 1
 
                     feature_matrix[new_spot] = saved_features  # undo changes on the feature matrix
+                    obtained_labels_list = np.argmax(softmax_output_list, axis=1)
                 return softmax_output_list, obtained_labels_list
 
             #To store results
@@ -183,6 +193,18 @@ for train_index, test_index in test_split.split(labels, labels):
             #     softmax_output_list[start_index[i_results]:end_index[i_results]] = thread_results
             #     i_results += 1
             #print(softmax_output_list)
+            """
+            compute new label by averaging without copying
+            """
+            softmax_output_list_no_copy = gcn_softmax[list_new_posititons]
+            y_bar_x_no_copy = np.mean(softmax_output_list_no_copy, axis=0)
+            obtained_labels_list_no_copy = np.argmax(softmax_output_list_no_copy, axis=1)
+
+            new_label_no_copy = np.argmax( y_bar_x_no_copy, axis=0)
+            new_label_majority_no_copy = sp.stats.mode(obtained_labels_list_no_copy)[0]
+
+            new_pred_no_copy[node_index] = new_label_no_copy
+            new_pred_majority_no_copy[node_index] = new_label_majority_no_copy
 
             """
             compute new label by averaging after copying
@@ -202,23 +224,52 @@ for train_index, test_index in test_split.split(labels, labels):
         close()
 
         acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
+
+        acc_new_no_copy_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_no_copy[attacked_nodes])
+        acc_new_no_copy_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority_no_copy[attacked_nodes])
+
         acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
         acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
 
         print("ACC old pred : " + str(acc_old_list[trial]))
 
-        print("ACC new pred (avg. softmax) : " + str(acc_new_list[trial]))
+        print("ACC new pred (no copying) (avg. softmax) : " + str(acc_new_no_copy_list[trial]))
+        print("ACC new pred (no copying) (majority vote) : " + str(acc_new_no_copy_majority_list[trial]))
 
-        print("ACC new pred (majority vote) : " + str(acc_new_majority_list[trial]))
+        print("ACC new pred (copying) (avg. softmax) : " + str(acc_new_list[trial]))
+        print("ACC new pred (copying) (majority vote) : " + str(acc_new_majority_list[trial]))
 
 
+print('========================================================================================================')
 print('Mean and std. error of GCN accuracy at attacked nodes : {} and {}'.format(np.mean(acc_old_list)*100, np.std(acc_old_list)*100))
-print('Mean and std. error of Copying model accuracy at attacked nodes  (avg. softmax) : {} and {}'.format(np.mean(acc_new_list)*100, np.std(acc_new_list)*100))
-print('Mean and std. error of Copying model accuracy at attacked nodes  (majority vote) : {} and {}'.format(np.mean(acc_new_majority_list)*100, np.std(acc_new_majority_list)*100))
+
+print('========================================================================================================')
+
+print('Mean and std. error of accuracy at attacked nodes (no copying) (avg. softmax) : {} and {}'.format(np.mean(acc_new_no_copy_list)*100,
+                                                                                                           np.std(acc_new_no_copy_list)*100))
+print('Mean and std. error of accuracy at attacked nodes (no copying) (majority vote) : {} and {}'.format(np.mean(acc_new_no_copy_majority_list)*100,
+                                                                                                            np.std(acc_new_no_copy_majority_list)*100))
+
+print('========================================================================================================')
+
+print('Mean and std. error of Copying model accuracy at attacked nodes  (avg. softmax) : {} and {}'.format(np.mean(acc_new_list)*100,
+                                                                                                           np.std(acc_new_list)*100))
+print('Mean and std. error of Copying model accuracy at attacked nodes  (majority vote) : {} and {}'.format(np.mean(acc_new_majority_list)*100,
+                                                                                                            np.std(acc_new_majority_list)*100))
+
+print('========================================================================================================')
+
+_, p_value_no_copy = sp.stats.wilcoxon(acc_old_list, acc_new_no_copy_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (no copying) (avg. softmax): ' + str(p_value_no_copy))
+
+_, p_value_no_copy_majority = sp.stats.wilcoxon(acc_old_list, acc_new_no_copy_majority_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (no copying) (majority vote): ' + str(p_value_no_copy_majority))
+
+print('========================================================================================================')
 
 _, p_value = sp.stats.wilcoxon(acc_old_list, acc_new_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (avg. softmax): ' + str(p_value))
+print('The p value from Wilcoxon signed rank test (copying) (avg. softmax): ' + str(p_value))
 
 _, p_value_majority = sp.stats.wilcoxon(acc_old_list, acc_new_majority_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (majority vote): ' + str(p_value_majority))
+print('The p value from Wilcoxon signed rank test (copying) (majority vote): ' + str(p_value_majority))
 
