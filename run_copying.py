@@ -19,14 +19,14 @@ from attacks import *
 
 """
 trials = 50
-dataset = 'cora'
+dataset = 'pubmed'
 dice_attack = True
 percent_corruption_neighbors = 0.5
 
 num_attacked_nodes = 50
 new_positions = 10
 
-initial_num_labels = 20
+initial_num_labels = 10
 
 SEED = 123
 np.random.seed(SEED)
@@ -95,7 +95,7 @@ for train_index, test_index in test_split.split(labels, labels):
         else:
             attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
 
-        full_A_tilde = preprocess_adj(attacked_adj, True)
+        full_A_tilde = preprocess_adj(attacked_adj, False,True)
 
         """
         Train a GCN to get a predictor to evaluate the accuracy at the attacked nodes.
@@ -154,10 +154,12 @@ for train_index, test_index in test_split.split(labels, labels):
                         feature_matrix[new_spot])  # save replaced node features to do everything in place (memory)
 
                     feature_matrix[new_spot] = node_features  # move the node to the new position
-
+                    start = time.time()
                     softmax_output_of_node = fast_localized_softmax(feature_matrix, new_spot, full_A_tilde, w_0,
                                                                     w_1)  # get new softmax output at this position
-
+                    end = time.time()
+                   # print(end-start)
+                    
                     obt_label = np.argmax(softmax_output_of_node)
 
                     softmax_output_list[i] = softmax_output_of_node
@@ -166,11 +168,11 @@ for train_index, test_index in test_split.split(labels, labels):
                     feature_matrix[new_spot] = saved_features  # undo changes on the feature matrix
                     obtained_labels_list = np.argmax(softmax_output_list, axis=1)
                 return softmax_output_list, obtained_labels_list
-
+            
             #To store results
-            softmax_output_list, obtained_labels_list = move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1,
+            softmax_output_list, obtained_labels_list = move_node(list_new_posititons, features_sparse, number_labels, full_A_tilde, w_0, w_1,
                                             node_features)
-
+           
             # partition_size = int(len(list_new_posititons) / CORES)
 
             # start_index = list(range(0, len(list_new_posititons), partition_size))

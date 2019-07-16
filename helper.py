@@ -57,8 +57,9 @@ def softmax(x):
 def fast_localized_softmax(features, new_spot, full_A_tilde, w_0, w_1):
     neighbors_index = np.argwhere(full_A_tilde[new_spot, :])[:, 1]
     A_neig = full_A_tilde[neighbors_index, :]
-    H_out = np.matmul(np.matmul(A_neig, features), w_0)
+    H_out = A_neig @ features @ w_0
+    H_out = H_out.A
     relu_out = np.maximum(H_out, 0, H_out)
     A_i_neigh = full_A_tilde[new_spot, neighbors_index]
-    H2_out = np.matmul(np.matmul(A_i_neigh, relu_out), w_1)
+    H2_out = A_i_neigh @ relu_out @  w_1
     return softmax(H2_out)

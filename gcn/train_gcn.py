@@ -121,4 +121,4 @@ def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_ma
 
     A_tilde = support
 
-    return w_0, w_1, A_tilde, softmax, close_session
+    return sparse.csr_matrix(w_0), sparse.csr_matrix(w_1), A_tilde, softmax, close_session
