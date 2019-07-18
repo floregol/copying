@@ -7,7 +7,7 @@ import math
 
 def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, percent_corruption_neighbors):
     random.seed(seed)
-    attack_adj = deepcopy(adj).todense()
+    attack_adj = deepcopy(adj)
     nodes_to_corrupt = random.sample(list(list_test_nodes), m)
 
     for n in nodes_to_corrupt:
@@ -27,7 +27,7 @@ def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, p
 
 def poison_adj_DISCONNECTING_attack(seed, adj, m, list_test_nodes):
     random.seed(seed)
-    attack_adj = deepcopy(adj).todense()
+    attack_adj = deepcopy(adj)
     nodes_to_corrupt = random.sample(list(list_test_nodes), m)
 
     for n in nodes_to_corrupt:
