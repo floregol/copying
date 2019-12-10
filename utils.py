@@ -137,6 +137,7 @@ def preprocess_adj(adj, dense=False, spr=False):
         return adj_normalized.todense()
     if spr:
         return sp.csr_matrix(adj_normalized)
+      
     return sparse_to_tuple(adj_normalized)
 
 

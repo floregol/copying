@@ -2,7 +2,7 @@ import random
 import matplotlib.pyplot as plt
 from sklearn.metrics.pairwise import rbf_kernel
 import numpy as np
-
+from numpy import matlib as mb
 
 def sample_new_pos(m, z, node_index):
     pairwise = rbf_kernel(z)
@@ -31,6 +31,6 @@ def compute_euclidean_distance(embed):
 
     N = embed.shape[0]
     p = np.dot(embed, np.transpose(embed))
-    q = np.matlib.repmat(np.diag(p), N, 1)
+    q = mb.repmat(np.diag(p), N, 1)
     dist = q + np.transpose(q) - 2 * p
     return dist

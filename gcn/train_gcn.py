@@ -2,6 +2,8 @@ from __future__ import division
 from __future__ import print_function
 
 import time
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 
 from utils import *
@@ -27,29 +29,33 @@ flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of e
 flags.DEFINE_integer('max_degree', 3, 'Maximum Chebyshev polynomial degree.')
 
 
-def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_mask, val_mask, test_mask, VERBOSE=False):
+def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_mask, val_mask, test_mask, mlp=False, VERBOSE=False):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '6'
     # Set random seed
     seed = seed
     np.random.seed(seed)
-    tf.set_random_seed(seed)
+    tf.compat.v1.set_random_seed(seed)
 
     # Some preprocessing
     features = sparse_to_tuple(features_sparse)
 
     support = [preprocess_adj(adj)]
     num_supports = 1
-    model_func = GCN
+    if mlp:
+        model_func = MLP
+    else:
+        model_func = GCN
+
 
     # Define placeholders
     placeholders = {
-        'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
-        'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(features[2], dtype=tf.int64)),
-        'labels': tf.placeholder(tf.float32, shape=(None, y_train.shape[1])),
-        'labels_mask': tf.placeholder(tf.int32),
-        'dropout': tf.placeholder_with_default(0., shape=()),
+        'support': [tf.compat.v1.sparse_placeholder(tf.float32) for _ in range(num_supports)],
+        'features': tf.compat.v1.sparse_placeholder(tf.float32, shape=tf.constant(features[2], dtype=tf.int64)),
+        'labels': tf.compat.v1.placeholder(tf.float32, shape=(None, y_train.shape[1])),
+        'labels_mask': tf.compat.v1.placeholder(tf.int32),
+        'dropout': tf.compat.v1.placeholder_with_default(0., shape=()),
         'num_features_nonzero':
-            tf.placeholder(tf.int32)  # helper variable for sparse dropout
+            tf.compat.v1.placeholder(tf.int32)  # helper variable for sparse dropout
     }
     input_dim = features[2][1]
     # Create model
@@ -121,4 +127,4 @@ def get_trained_gcn(seed, adj, features_sparse, y_train, y_val, y_test, train_ma
 
     A_tilde = support
 
-    return sparse.csr_matrix(w_0), sparse.csr_matrix(w_1), A_tilde, softmax, close_session
+    return w_0, w_1, A_tilde, softmax, close_session

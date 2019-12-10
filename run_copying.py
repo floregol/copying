@@ -1,4 +1,6 @@
 import time
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 from utils import load_data, preprocess_adj, preprocess_features, sparse_to_tuple
 import numpy as np
 import scipy as sp
@@ -19,7 +21,7 @@ from attacks import *
 
 """
 trials = 50
-dataset = 'pubmed'
+dataset = 'cora'
 dice_attack = True
 percent_corruption_neighbors = 0.5
 
@@ -94,15 +96,15 @@ for train_index, test_index in test_split.split(labels, labels):
             attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes, test_index, percent_corruption_neighbors)
         else:
             attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
-
-        full_A_tilde = preprocess_adj(attacked_adj, False,True)
-
+        
+        full_A_tilde = preprocess_adj(attacked_adj, dense=False,spr=True)
+      
         """
         Train a GCN to get a predictor to evaluate the accuracy at the attacked nodes.
         """
         w_0, w_1, A_tilde, gcn_soft, close = get_trained_gcn(seed, attacked_adj, features_sparse, y_train, y_val,
                                                              y_test, train_mask, val_mask, test_mask)
-
+        
         # Get prediction by the GCN
         initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))
         
@@ -173,28 +175,7 @@ for train_index, test_index in test_split.split(labels, labels):
             softmax_output_list, obtained_labels_list = move_node(list_new_posititons, features_sparse, number_labels, full_A_tilde, w_0, w_1,
                                             node_features)
            
-            # partition_size = int(len(list_new_posititons) / CORES)
-
-            # start_index = list(range(0, len(list_new_posititons), partition_size))
-            # end_index = [i for i in start_index[1:]]
-            # end_index.append(len(list_new_posititons))
-            # splited_list = [list(list_new_posititons[start_index[i]:end_index[i]]) for i in range(CORES)]
-
-            # softmax_output_lists = [np.zeros((len(i), number_labels)) for i in splited_list]
-            # pool = mp.Pool(processes=CORES)
-            # pool_results = [
-            #     pool.apply_async(move_node, (splited_list[i], feature_matrix, softmax_output_lists[i], number_labels,
-            #                                  full_A_tilde, w_0, w_1, node_features)) for i in range(CORES)
-            # ]
-            # pool.close()
-            # pool.join()
-            # i_results = 0
-
-            # for pr in pool_results:
-            #     thread_results = pr.get()
-            #     softmax_output_list[start_index[i_results]:end_index[i_results]] = thread_results
-            #     i_results += 1
-            #print(softmax_output_list)
+            
             """
             compute new label by averaging without copying
             """

@@ -7,9 +7,10 @@ import math
 
 def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, percent_corruption_neighbors):
     random.seed(seed)
-    attack_adj = deepcopy(adj)
+    attack_adj = deepcopy(adj).todense()
+    
     nodes_to_corrupt = random.sample(list(list_test_nodes), m)
-
+    
     for n in nodes_to_corrupt:
         label = np.argmax(labels[n])
         degree = np.sum(attack_adj[n, :])
@@ -21,7 +22,7 @@ def poison_adj_DICE_attack(seed, adj, labels, communities, m, list_test_nodes, p
         new_neighbors = random.sample(list(np.setdiff1d(range(adj.shape[0]), communities[label])), num_remove_neighbors)
         attack_adj[n, new_neighbors] = 1
         attack_adj[new_neighbors, n] = 1
-
+    
     return sparse.csr_matrix(attack_adj), nodes_to_corrupt
 
 

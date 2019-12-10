@@ -8,6 +8,8 @@ from sklearn.metrics import average_precision_score
 os.environ['CUDA_VISIBLE_DEVICES'] = ""
 import sys
 sys.path.append("../gvae")
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 import numpy as np
 import scipy.sparse as sp
