@@ -30,7 +30,7 @@ flags.DEFINE_float('dropout_embed', 0., 'Dropout rate (1 - keep probability).')
 #flags.DEFINE_string('gvae_model', 'gcn_vae', 'Model string.')
 
 
-def get_z_embedding(adj, features, labels, seed, verbose=True, model_str='gcn_vae'):
+def get_z_embedding(adj, features, labels, seed, verbose=True, model_str='gcn_ae'):
 
     np.random.seed(seed)
     tf.set_random_seed(seed)
