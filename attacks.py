@@ -15,6 +15,8 @@ def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_n
     An = preprocess_graph(attack_adj)
     degrees = attack_adj.sum(axis=1).flatten()
     surrogate_model = GCN(sizes, An, features_sparse, with_relu=False, name="surrogate", gpu_id=gpu_id)
+    split_val = np.argwhere(train_mask).reshape(-1)
+    split_val = np.argwhere(val_mask).reshape(-1)
     surrogate_model.train(split_train, split_val, labels)
     W1 = surrogate_model.W1.eval(session=surrogate_model.session)
     W2 = surrogate_model.W2.eval(session=surrogate_model.session)

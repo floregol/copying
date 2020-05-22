@@ -14,6 +14,9 @@ import numpy as np
 from utils import load_data, preprocess_adj, preprocess_features, sparse_to_tuple
 import time
 import os
+import torch
+from defense import GCN, GCNSVD
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # import multiprocess as mp
 """
@@ -24,7 +27,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 trials = 3
 dataset = 'cora'
-attack_name = 'nettack'  # nettack
+attack_name = 'DICE'  # nettack
 percent_corruption_neighbors = 0.75
 
 num_attacked_nodes = 50
@@ -52,7 +55,7 @@ else:
 print('Number of trials : ' + str(trials))
 
 adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
-
+flatten_labels = np.argwhere(labels)[:, 1].flatten()
 ground_truth = np.argmax(labels, axis=1)
 
 K = np.max(ground_truth) + 1
@@ -73,12 +76,13 @@ for train_index, test_index in test_split.split(labels, labels):
 
     y_train, y_val, y_test, train_mask, val_mask, test_mask = get_split(n, train_index, test_index, labels,
                                                                         initial_num_labels)
-
+    idx_train = np.argwhere(train_mask).reshape(-1)
     N = len(y_train)
 
     acc_old_list = np.zeros(trials)
 
     acc_new_no_copy_list = np.zeros(trials)
+    acc_baseline_gcnsvd = np.zeros(trials)
     acc_new_no_copy_majority_list = np.zeros(trials)
 
     acc_new_list = np.zeros(trials)
@@ -99,8 +103,8 @@ for train_index, test_index in test_split.split(labels, labels):
             attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes,
                                                                   test_index, percent_corruption_neighbors)
         elif attack_name == 'nettack':
-            attacked_adj, attacked_nodes = poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_nodes,
-                                                                  test_index, train_mask, val_mask)
+            attacked_adj, attacked_nodes = poison_adj_NETTACK_attack(
+                seed, adj, labels, features_sparse, num_attacked_nodes, test_index, train_mask, val_mask)
         else:
             attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
 
@@ -125,6 +129,19 @@ for train_index, test_index in test_split.split(labels, labels):
 
         print("ACC old pred at attacked nodes: " +
               str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
+
+       
+
+        print('Baseline GCNSVD')
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = GCNSVD(nfeat=features_sparse.shape[1], nclass=flatten_labels.max() + 1, nhid=16, device=device)
+        model = model.to(device)
+        model.fit(features_sparse, attacked_adj, flatten_labels, idx_train)
+        model.eval()
+
+        baseline_gcnsvd_acc = model.test(attacked_nodes).item()
+        
+        
         """
         Get the embeddings of all the nodes
         """
@@ -201,7 +218,7 @@ for train_index, test_index in test_split.split(labels, labels):
         close()
 
         acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
-
+        
         acc_new_no_copy_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_no_copy[attacked_nodes])
         acc_new_no_copy_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes],
                                                               new_pred_majority_no_copy[attacked_nodes])
@@ -209,8 +226,11 @@ for train_index, test_index in test_split.split(labels, labels):
         acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
         acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
 
-        print("ACC old pred : " + str(acc_old_list[trial]))
+        acc_baseline_gcnsvd[trials] = baseline_gcnsvd_acc
 
+        
+        print("ACC old pred : " + str(acc_old_list[trial]))
+        print("ACC baseline at attacked nodes", baseline_gcnsvd_acc)
         print("ACC new pred (no copying) (avg. softmax) : " + str(acc_new_no_copy_list[trial]))
         print("ACC new pred (no copying) (majority vote) : " + str(acc_new_no_copy_majority_list[trial]))
 
