@@ -25,19 +25,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 """
 
-trials = 3
+trials = 2
 dataset = 'cora'
-attack_name = 'nettack'  # nettack
+attack_name = 'DICE'  # nettack
 percent_corruption_neighbors = 0.75
 
-num_attacked_nodes = 5
+num_attacked_nodes = 50
 new_positions = 10
 
 initial_num_labels = 10
 SEED = 123
 np.random.seed(SEED)
 
-NUM_CROSS_VAL = 3
+NUM_CROSS_VAL = 2
 #CORES = 4
 
 print('========================================================================================================')
@@ -138,6 +138,8 @@ for train_index, test_index in test_split.split(labels, labels):
         model.eval()
 
         baseline_gcnsvd_acc = model.test(attacked_nodes).item()
+        print(type(baseline_gcnsvd_acc))
+        print(baseline_gcnsvd_acc)
         """
         Get the embeddings of all the nodes
         """
@@ -222,7 +224,7 @@ for train_index, test_index in test_split.split(labels, labels):
         acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
         acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
 
-        acc_baseline_gcnsvd[trials] = baseline_gcnsvd_acc
+        acc_baseline_gcnsvd[trial] = baseline_gcnsvd_acc
 
         print("ACC old pred : " + str(acc_old_list[trial]))
         print("ACC baseline at attacked nodes", baseline_gcnsvd_acc)
@@ -254,6 +256,12 @@ print('Mean and std. error of Copying model accuracy at attacked nodes  (avg. so
 print('Mean and std. error of Copying model accuracy at attacked nodes  (majority vote) : {} and {}'.format(
     np.mean(acc_new_majority_list) * 100,
     np.std(acc_new_majority_list) * 100))
+
+print('========================================================================================================')
+
+print('Mean and std. error of Baseline GCNSVD accuracy at attacked nodes  : {} and {}'.format(
+    np.mean(acc_baseline_gcnsvd) * 100,
+    np.std(acc_baseline_gcnsvd) * 100))
 
 print('========================================================================================================')
 
