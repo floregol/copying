@@ -27,10 +27,10 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 trials = 3
 dataset = 'cora'
-attack_name = 'DICE'  # nettack
+attack_name = 'nettack'  # nettack
 percent_corruption_neighbors = 0.75
 
-num_attacked_nodes = 50
+num_attacked_nodes = 5
 new_positions = 10
 
 initial_num_labels = 10
@@ -130,8 +130,6 @@ for train_index, test_index in test_split.split(labels, labels):
         print("ACC old pred at attacked nodes: " +
               str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
 
-       
-
         print('Baseline GCNSVD')
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         model = GCNSVD(nfeat=features_sparse.shape[1], nclass=flatten_labels.max() + 1, nhid=16, device=device)
@@ -140,8 +138,6 @@ for train_index, test_index in test_split.split(labels, labels):
         model.eval()
 
         baseline_gcnsvd_acc = model.test(attacked_nodes).item()
-        
-        
         """
         Get the embeddings of all the nodes
         """
@@ -218,7 +214,7 @@ for train_index, test_index in test_split.split(labels, labels):
         close()
 
         acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
-        
+
         acc_new_no_copy_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_no_copy[attacked_nodes])
         acc_new_no_copy_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes],
                                                               new_pred_majority_no_copy[attacked_nodes])
@@ -228,7 +224,6 @@ for train_index, test_index in test_split.split(labels, labels):
 
         acc_baseline_gcnsvd[trials] = baseline_gcnsvd_acc
 
-        
         print("ACC old pred : " + str(acc_old_list[trial]))
         print("ACC baseline at attacked nodes", baseline_gcnsvd_acc)
         print("ACC new pred (no copying) (avg. softmax) : " + str(acc_new_no_copy_list[trial]))

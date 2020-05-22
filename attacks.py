@@ -7,15 +7,16 @@ from nettack.GCN import GCN
 from nettack.nettack import Nettack
 from nettack.utils import preprocess_graph
 
-def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_nodes, test_index, train_mask, val_mask):
+def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, m, list_test_nodes, train_mask, val_mask):
 
     random.seed(seed)
     sizes = [16, labels.shape[1]]
-    attack_adj = deepcopy(adj).todense()
-    An = preprocess_graph(attack_adj)
-    degrees = attack_adj.sum(axis=1).flatten()
-    surrogate_model = GCN(sizes, An, features_sparse, with_relu=False, name="surrogate", gpu_id=gpu_id)
-    split_val = np.argwhere(train_mask).reshape(-1)
+    degrees = adj.A.sum(axis=1).flatten()
+    
+    An = preprocess_graph(adj)
+    
+    surrogate_model = GCN(sizes, An, features_sparse, with_relu=False, name="surrogate", gpu_id=0)
+    split_train = np.argwhere(train_mask).reshape(-1)
     split_val = np.argwhere(val_mask).reshape(-1)
     surrogate_model.train(split_train, split_val, labels)
     W1 = surrogate_model.W1.eval(session=surrogate_model.session)
@@ -26,9 +27,10 @@ def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_n
     perturb_structure = True
     n_influencers = 1
     flatten_labels = np.argwhere(labels)[:, 1].flatten()
+    attack_adj = adj
     for u in nodes_to_corrupt:
 
-        nettack = Nettack(attack_adj, features_sparse, flatten_labels, W1, W2, u, verbose=False)
+        nettack = Nettack(attack_adj, features_sparse, flatten_labels, W1, W2, u, verbose=True)
         n_perturbations = int(degrees[u])  # How many perturbations to perform. Default: Degree of the node
         nettack.reset()
         nettack.attack_surrogate(
