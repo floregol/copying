@@ -30,7 +30,7 @@ def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, m, list_test_n
     attack_adj = adj
     for u in nodes_to_corrupt:
 
-        nettack = Nettack(attack_adj, features_sparse, flatten_labels, W1, W2, u, verbose=True)
+        nettack = Nettack(attack_adj, features_sparse, flatten_labels, W1, W2, u, verbose=False)
         n_perturbations = int(degrees[u])  # How many perturbations to perform. Default: Degree of the node
         nettack.reset()
         nettack.attack_surrogate(

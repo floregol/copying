@@ -10,18 +10,24 @@ from copy import copy, deepcopy
 from gcn.train_gcn import get_trained_gcn
 from scipy.sparse import csr_matrix
 from sklearn.metrics import accuracy_score
+import scipy as sp
+import time
 
 
 def run_trial(train_index, test_index, seed, trial, labels, adj, features_sparse, feature_matrix, initial_num_labels,
-              attack_name, percent_corruption_neighbors, num_attacked_nodes):
+              attack_name, percent_corruption_neighbors, num_attacked_nodes, new_positions):
     n = feature_matrix.shape[0]
     y_train, y_val, y_test, train_mask, val_mask, test_mask = get_split(n, train_index, test_index, labels,
                                                                         initial_num_labels)
     idx_train = np.argwhere(train_mask).reshape(-1)
-
-    flatten_labels = np.argwhere(labels)[:, 1].flatten()
     ground_truth = np.argmax(labels, axis=1)
+    K = np.max(ground_truth) + 1
+    communities = {}
+    for k in range(K):
+        communities[k] = np.where(ground_truth == k)[0]
+    flatten_labels = np.argwhere(labels)[:, 1].flatten()
 
+    number_labels = labels.shape[1]
     np.random.seed(seed)  # set the seed for current trial
     random.seed(seed)
     print('========================================================================================================')
@@ -30,12 +36,10 @@ def run_trial(train_index, test_index, seed, trial, labels, adj, features_sparse
     First, corrupt the adjacency matrix for a a fixed number of randomly sleected nodes from the test set.
     """
     if attack_name == 'dice':
-        K = np.max(ground_truth) + 1
-        communities = {}
-        for k in range(K):
-            communities[k] = np.where(ground_truth == k)[0]
+
         attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes,
                                                               test_index, percent_corruption_neighbors)
+
     elif attack_name == 'nettack':
         attacked_adj, attacked_nodes = poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_nodes,
                                                                  test_index, train_mask, val_mask)
@@ -63,21 +67,12 @@ def run_trial(train_index, test_index, seed, trial, labels, adj, features_sparse
 
     print("ACC old pred at attacked nodes: " +
           str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
-    print('features_sparse', features_sparse.shape)
-    print('flatten_labels', flatten_labels.shape)
-    print('attacked_adj', attacked_adj.shape)
-    print('idx_train', idx_train.shape)
-    print('attacked_nodes', len(attacked_nodes))
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(device)
-    model = GCNSVD(nfeat=features_sparse.shape[1], nclass=flatten_labels.max() + 1, nhid=16, device=device)
-    print('1')
-    model = model.to(device)
-    print('1')
-    model.fit(features_sparse, attacked_adj, flatten_labels, idx_train)
-    print('1')
-    gcnsvd_acc = model.test(attacked_nodes).item()
+    # model = GCNSVD(nfeat=features_sparse.shape[1], nclass=K, nhid=16, device='cpu')
+    # model = model.to('cpu')
+    # model.fit(features_sparse, attacked_adj, flatten_labels, idx_train)
+    # gcnsvd_acc = model.test(attacked_nodes).item()
+    gcnsvd_acc = 0
     """
     Get the embeddings of all the nodes
     """

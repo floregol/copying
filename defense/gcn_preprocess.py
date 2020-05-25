@@ -18,7 +18,7 @@ class GCNSVD(GCN):
         super(GCNSVD, self).__init__(nfeat, nhid, nclass, dropout, lr, weight_decay, with_relu, with_bias, device=device)
         self.device = device
 
-    def fit(self, features, adj, labels, idx_train, idx_val=None, k=50, train_iters=200, initialize=True, verbose=False):
+    def fit(self, features, adj, labels, idx_train, idx_val=None, k=50, train_iters=200, initialize=True, verbose=True):
 
         modified_adj = self.truncatedSVD(adj, k=k)
         # modified_adj_tensor = utils.sparse_mx_to_torch_sparse_tensor(self.modified_adj)

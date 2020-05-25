@@ -1,3 +1,6 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import pickle as pk
 import scipy.stats
 import scipy as sp
@@ -5,12 +8,11 @@ import numpy as np
 from utils import load_data, preprocess_features
 from sklearn.model_selection import StratifiedShuffleSplit
 import time
-import os
 import sys
 from defense_trial import run_trial
 
 result_path = 'results'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 num_attacked_nodes = 50
 new_positions = 10
 SEED = 123
@@ -46,7 +48,7 @@ adj, initial_features, _, _, _, _, _, _, labels = load_data(dataset)
 
 features_sparse = preprocess_features(initial_features)
 feature_matrix = features_sparse.todense()
-number_labels = labels.shape[1]
+
 
 test_split = StratifiedShuffleSplit(n_splits=trials, test_size=0.8, random_state=SEED)
 test_split.get_n_splits(labels, labels)
@@ -63,7 +65,7 @@ trial = 0
 for train_index, test_index in test_split.split(labels, labels):
     gcn_acc, gcnsvd_acc, copy_acc, copy_maj_acc, nocopy_acc, nocopy_maj_acc = run_trial(
         train_index, test_index, seed_list[trial], trial, labels, adj, features_sparse, feature_matrix,
-        initial_num_labels, attack_name, percent_corruption_neighbors, num_attacked_nodes)
+        initial_num_labels, attack_name, percent_corruption_neighbors, num_attacked_nodes, new_positions)
     trial += 1
 
 print('========================================================================================================')
