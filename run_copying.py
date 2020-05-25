@@ -15,30 +15,28 @@ from utils import load_data, preprocess_adj, preprocess_features, sparse_to_tupl
 import time
 import os
 import torch
+import sys
 from defense import GCN, GCNSVD
-
+result_path = 'results'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-# import multiprocess as mp
-"""
-
- Moving the nodes around experiment
-
-"""
-
-trials = 2
-dataset = 'cora'
-attack_name = 'DICE'  # nettack
-percent_corruption_neighbors = 0.75
-
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+dice_name = 'dice'
 num_attacked_nodes = 50
 new_positions = 10
-
-initial_num_labels = 10
 SEED = 123
 np.random.seed(SEED)
+"""
+Parse input argument
+"""
+# python run_copying.py cora 50 10 dice 0.5
+dataset = sys.argv[1]
+trials = int(sys.argv[2])  # num of random partition
+num_cores = int(sys.argv[3])
+attack_name = sys.argv[4]  # nettack
 
-NUM_CROSS_VAL = 2
-#CORES = 4
+initial_num_labels = 10
+if attack_name == dice_name:  # get the beta percent
+    percent_corruption_neighbors = float(sys.argv[5])
 
 print('========================================================================================================')
 print('The datset is : ' + str(dataset))
@@ -68,10 +66,19 @@ feature_matrix = features_sparse.todense()
 n = feature_matrix.shape[0]
 number_labels = labels.shape[1]
 
-test_split = StratifiedShuffleSplit(n_splits=NUM_CROSS_VAL, test_size=0.37, random_state=SEED)
+test_split = StratifiedShuffleSplit(n_splits=trials, test_size=0.8, random_state=SEED)
 test_split.get_n_splits(labels, labels)
 seed_list = np.random.randint(1, 1e6, trials)
 
+acc_old_list = np.zeros(trials)
+
+acc_new_no_copy_list = np.zeros(trials)
+acc_baseline_gcnsvd_list = np.zeros(trials)
+acc_new_no_copy_majority_list = np.zeros(trials)
+
+acc_new_list = np.zeros(trials)
+acc_new_majority_list = np.zeros(trials)
+trial = 0
 for train_index, test_index in test_split.split(labels, labels):
 
     y_train, y_val, y_test, train_mask, val_mask, test_mask = get_split(n, train_index, test_index, labels,
@@ -79,160 +86,148 @@ for train_index, test_index in test_split.split(labels, labels):
     idx_train = np.argwhere(train_mask).reshape(-1)
     N = len(y_train)
 
-    acc_old_list = np.zeros(trials)
+    seed = seed_list[trial]
 
-    acc_new_no_copy_list = np.zeros(trials)
-    acc_baseline_gcnsvd = np.zeros(trials)
-    acc_new_no_copy_majority_list = np.zeros(trials)
+    np.random.seed(seed)  # set the seed for current trial
+    random.seed(seed)
+    print('========================================================================================================')
+    print('trial : ' + str(trial))
+    """
+    First, corrupt the adjacency matrix for a a fixed number of randomly sleected nodes from the test set.
+    """
+    if attack_name == dice_name:
+        attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes,
+                                                              test_index, percent_corruption_neighbors)
+    elif attack_name == 'nettack':
+        attacked_adj, attacked_nodes = poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, num_attacked_nodes,
+                                                                 test_index, train_mask, val_mask)
+    else:
+        attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
 
-    acc_new_list = np.zeros(trials)
-    acc_new_majority_list = np.zeros(trials)
+    full_A_tilde = preprocess_adj(attacked_adj, dense=False, spr=True)
+    """
+    Train a GCN to get a predictor to evaluate the accuracy at the attacked nodes.
+    """
+    w_0, w_1, A_tilde, gcn_soft, close = get_trained_gcn(seed, attacked_adj, features_sparse, y_train, y_val, y_test,
+                                                         train_mask, val_mask, test_mask)
 
-    for trial in range(trials):
-        seed = seed_list[trial]
+    # Get prediction by the GCN
+    initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))
 
-        np.random.seed(seed)  # set the seed for current trial
-        random.seed(seed)
-        print(
-            '========================================================================================================')
-        print('trial : ' + str(trial))
+    full_pred_gcn = np.argmax(initial_gcn, axis=1)
+
+    gcn_softmax = deepcopy(initial_gcn)
+    new_pred_no_copy = deepcopy(full_pred_gcn)
+    new_pred_majority_no_copy = deepcopy(full_pred_gcn)
+
+    new_pred = deepcopy(full_pred_gcn)
+    new_pred_majority = deepcopy(full_pred_gcn)
+
+    print("ACC old pred at attacked nodes: " +
+          str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
+
+    
+    
+    model = GCNSVD(nfeat=features_sparse.shape[1], nclass=flatten_labels.max() + 1, nhid=16, device=device)
+    model = model.to(device)
+    model.fit(features_sparse, attacked_adj, flatten_labels, idx_train)
+    model.eval()
+    baseline_gcnsvd_acc = model.test(attacked_nodes).item()
+   
+    """
+    Get the embeddings of all the nodes
+    """
+    z = get_z_embedding(attacked_adj, features_sparse, labels, seed, verbose=False)
+
+    dist = compute_euclidean_distance(z)
+
+    j = 0
+    """
+    Now or each attacked nodes, we copy it to new positions hoping tha we can recover the true label
+    """
+    for node_index in attacked_nodes:  
+
+        node_features = deepcopy(feature_matrix[node_index])
+        start_time = time.time()
+
+        node_true_label = ground_truth[node_index]
+        node_thinking_label = full_pred_gcn[node_index]
+
+        list_new_posititons = get_new_pos(new_positions, dist, node_index)
+
+        def move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1, node_features):
+            i = 0
+            softmax_output_list = np.zeros((new_positions, number_labels))
+            for new_spot in list_new_posititons:
+                replaced_node_label = ground_truth[new_spot]
+                saved_features = deepcopy(
+                    feature_matrix[new_spot])  # save replaced node features to do everything in place (memory)
+
+                # move the node to the new position
+                feature_matrix[new_spot] = node_features
+                start = time.time()
+                softmax_output_of_node = fast_localized_softmax(feature_matrix, new_spot, full_A_tilde, w_0,
+                                                                w_1)  # get new softmax output at this position
+                end = time.time()
+                # print(end-start)
+
+                obt_label = np.argmax(softmax_output_of_node)
+
+                softmax_output_list[i] = softmax_output_of_node
+                i += 1
+
+                # undo changes on the feature matrix
+                feature_matrix[new_spot] = saved_features
+                obtained_labels_list = np.argmax(softmax_output_list, axis=1)
+            return softmax_output_list, obtained_labels_list
+
+        # To store results
+        softmax_output_list, obtained_labels_list = move_node(list_new_posititons, features_sparse, number_labels,
+                                                              full_A_tilde, w_0, w_1, node_features)
         """
-        First, corrupt the adjacency matrix for a a fixed number of randomly sleected nodes from the test set.
+        compute new label by averaging without copying
         """
-        if attack_name == 'DICE':
-            attacked_adj, attacked_nodes = poison_adj_DICE_attack(seed, adj, labels, communities, num_attacked_nodes,
-                                                                  test_index, percent_corruption_neighbors)
-        elif attack_name == 'nettack':
-            attacked_adj, attacked_nodes = poison_adj_NETTACK_attack(
-                seed, adj, labels, features_sparse, num_attacked_nodes, test_index, train_mask, val_mask)
-        else:
-            attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
+        softmax_output_list_no_copy = gcn_softmax[list_new_posititons]
+        y_bar_x_no_copy = np.mean(softmax_output_list_no_copy, axis=0)
+        obtained_labels_list_no_copy = np.argmax(softmax_output_list_no_copy, axis=1)
 
-        full_A_tilde = preprocess_adj(attacked_adj, dense=False, spr=True)
+        new_label_no_copy = np.argmax(y_bar_x_no_copy, axis=0)
+        new_label_majority_no_copy = sp.stats.mode(obtained_labels_list_no_copy)[0]
+
+        new_pred_no_copy[node_index] = new_label_no_copy
+        new_pred_majority_no_copy[node_index] = new_label_majority_no_copy
         """
-        Train a GCN to get a predictor to evaluate the accuracy at the attacked nodes.
+        compute new label by averaging after copying
         """
-        w_0, w_1, A_tilde, gcn_soft, close = get_trained_gcn(seed, attacked_adj, features_sparse, y_train, y_val,
-                                                             y_test, train_mask, val_mask, test_mask)
+        y_bar_x = np.mean(softmax_output_list, axis=0)
+        new_label = np.argmax(y_bar_x, axis=0)
+        new_label_majority = sp.stats.mode(obtained_labels_list)[0]
 
-        # Get prediction by the GCN
-        initial_gcn = gcn_soft(sparse_to_tuple(features_sparse))
+        new_pred[node_index] = new_label
+        new_pred_majority[node_index] = new_label_majority
 
-        full_pred_gcn = np.argmax(initial_gcn, axis=1)
+        j += 1
 
-        gcn_softmax = deepcopy(initial_gcn)
-        new_pred_no_copy = deepcopy(full_pred_gcn)
-        new_pred_majority_no_copy = deepcopy(full_pred_gcn)
+    close()
 
-        new_pred = deepcopy(full_pred_gcn)
-        new_pred_majority = deepcopy(full_pred_gcn)
+    acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
 
-        print("ACC old pred at attacked nodes: " +
-              str(accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])))
+    acc_new_no_copy_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_no_copy[attacked_nodes])
+    acc_new_no_copy_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes],
+                                                          new_pred_majority_no_copy[attacked_nodes])
 
-        print('Baseline GCNSVD')
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model = GCNSVD(nfeat=features_sparse.shape[1], nclass=flatten_labels.max() + 1, nhid=16, device=device)
-        model = model.to(device)
-        model.fit(features_sparse, attacked_adj, flatten_labels, idx_train)
-        model.eval()
+    acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
+    acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
 
-        baseline_gcnsvd_acc = model.test(attacked_nodes).item()
-        print(type(baseline_gcnsvd_acc))
-        print(baseline_gcnsvd_acc)
-        """
-        Get the embeddings of all the nodes
-        """
-        z = get_z_embedding(attacked_adj, features_sparse, labels, seed, verbose=False)
+    acc_baseline_gcnsvd_list[trial] = baseline_gcnsvd_acc
 
-        dist = compute_euclidean_distance(z)
-
-        j = 0
-        """
-        Now or each attacked nodes, we copy it to new positions hoping tha we can recover the true label
-        """
-        for node_index in attacked_nodes:  # TODO in parrallel copy features matrix
-
-            node_features = deepcopy(feature_matrix[node_index])
-            start_time = time.time()
-
-            node_true_label = ground_truth[node_index]
-            node_thinking_label = full_pred_gcn[node_index]
-
-            list_new_posititons = get_new_pos(new_positions, dist, node_index)
-
-            def move_node(list_new_posititons, feature_matrix, number_labels, full_A_tilde, w_0, w_1, node_features):
-                i = 0
-                softmax_output_list = np.zeros((new_positions, number_labels))
-                for new_spot in list_new_posititons:
-                    replaced_node_label = ground_truth[new_spot]
-                    saved_features = deepcopy(
-                        feature_matrix[new_spot])  # save replaced node features to do everything in place (memory)
-
-                    # move the node to the new position
-                    feature_matrix[new_spot] = node_features
-                    start = time.time()
-                    softmax_output_of_node = fast_localized_softmax(feature_matrix, new_spot, full_A_tilde, w_0,
-                                                                    w_1)  # get new softmax output at this position
-                    end = time.time()
-                    # print(end-start)
-
-                    obt_label = np.argmax(softmax_output_of_node)
-
-                    softmax_output_list[i] = softmax_output_of_node
-                    i += 1
-
-                    # undo changes on the feature matrix
-                    feature_matrix[new_spot] = saved_features
-                    obtained_labels_list = np.argmax(softmax_output_list, axis=1)
-                return softmax_output_list, obtained_labels_list
-
-            # To store results
-            softmax_output_list, obtained_labels_list = move_node(list_new_posititons, features_sparse, number_labels,
-                                                                  full_A_tilde, w_0, w_1, node_features)
-            """
-            compute new label by averaging without copying
-            """
-            softmax_output_list_no_copy = gcn_softmax[list_new_posititons]
-            y_bar_x_no_copy = np.mean(softmax_output_list_no_copy, axis=0)
-            obtained_labels_list_no_copy = np.argmax(softmax_output_list_no_copy, axis=1)
-
-            new_label_no_copy = np.argmax(y_bar_x_no_copy, axis=0)
-            new_label_majority_no_copy = sp.stats.mode(obtained_labels_list_no_copy)[0]
-
-            new_pred_no_copy[node_index] = new_label_no_copy
-            new_pred_majority_no_copy[node_index] = new_label_majority_no_copy
-            """
-            compute new label by averaging after copying
-            """
-            y_bar_x = np.mean(softmax_output_list, axis=0)
-            new_label = np.argmax(y_bar_x, axis=0)
-            new_label_majority = sp.stats.mode(obtained_labels_list)[0]
-
-            new_pred[node_index] = new_label
-            new_pred_majority[node_index] = new_label_majority
-
-            j += 1
-        close()
-
-        acc_old_list[trial] = accuracy_score(ground_truth[attacked_nodes], full_pred_gcn[attacked_nodes])
-
-        acc_new_no_copy_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_no_copy[attacked_nodes])
-        acc_new_no_copy_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes],
-                                                              new_pred_majority_no_copy[attacked_nodes])
-
-        acc_new_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred[attacked_nodes])
-        acc_new_majority_list[trial] = accuracy_score(ground_truth[attacked_nodes], new_pred_majority[attacked_nodes])
-
-        acc_baseline_gcnsvd[trial] = baseline_gcnsvd_acc
-
-        print("ACC old pred : " + str(acc_old_list[trial]))
-        print("ACC baseline at attacked nodes", baseline_gcnsvd_acc)
-        print("ACC new pred (no copying) (avg. softmax) : " + str(acc_new_no_copy_list[trial]))
-        print("ACC new pred (no copying) (majority vote) : " + str(acc_new_no_copy_majority_list[trial]))
-
-        print("ACC new pred (copying) (avg. softmax) : " + str(acc_new_list[trial]))
-        print("ACC new pred (copying) (majority vote) : " + str(acc_new_majority_list[trial]))
+    print("ACC old pred : " + str(acc_old_list[trial]))
+    print("ACC baseline at attacked nodes", baseline_gcnsvd_acc)
+    print("ACC new pred (no copying) (avg. softmax) : " + str(acc_new_no_copy_list[trial]))
+    print("ACC new pred (no copying) (majority vote) : " + str(acc_new_no_copy_majority_list[trial]))
+    print("ACC new pred (copying) (avg. softmax) : " + str(acc_new_list[trial]))
+    print("ACC new pred (copying) (majority vote) : " + str(acc_new_majority_list[trial]))
+    trial+=1
 
 print('========================================================================================================')
 print('Mean and std. error of GCN accuracy at attacked nodes : {} and {}'.format(
@@ -260,37 +255,35 @@ print('Mean and std. error of Copying model accuracy at attacked nodes  (majorit
 print('========================================================================================================')
 
 print('Mean and std. error of Baseline GCNSVD accuracy at attacked nodes  : {} and {}'.format(
-    np.mean(acc_baseline_gcnsvd) * 100,
-    np.std(acc_baseline_gcnsvd) * 100))
+    np.mean(acc_baseline_gcnsvd_list) * 100,
+    np.std(acc_baseline_gcnsvd_list) * 100))
 
 print('========================================================================================================')
 
-_, p_value_no_copy = sp.stats.wilcoxon(acc_old_list, acc_new_no_copy_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (no copying) (avg. softmax): ' + str(p_value_no_copy))
 
-_, p_value_no_copy_majority = sp.stats.wilcoxon(
-    acc_old_list, acc_new_no_copy_majority_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (no copying) (majority vote): ' + str(p_value_no_copy_majority))
+_, p_value_svd = sp.stats.wilcoxon(acc_old_list, acc_new_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (copying) (gcn): ' + str(p_value_majority))
 
-print('========================================================================================================')
+_, p_value_svd = sp.stats.wilcoxon(acc_baseline_gcnsvd_list, acc_new_list, zero_method='wilcox', correction=False)
+print('The p value from Wilcoxon signed rank test (copying) (svd): ' + str(p_value_majority))
 
-_, p_value = sp.stats.wilcoxon(acc_old_list, acc_new_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (copying) (avg. softmax): ' + str(p_value))
-
-_, p_value_majority = sp.stats.wilcoxon(acc_old_list, acc_new_majority_list, zero_method='wilcox', correction=False)
-print('The p value from Wilcoxon signed rank test (copying) (majority vote): ' + str(p_value_majority))
 
 to_store = {
     'acc_old_list': acc_old_list,
     'acc_new_no_copy_list': acc_new_no_copy_list,
     'acc_new_no_copy_majority_list': acc_new_no_copy_majority_list,
     'acc_new_list': acc_new_list,
-    'acc_new_majority_list': acc_new_majority_list
+    'acc_new_majority_list': acc_new_majority_list,
+    'acc_baseline_gcnsvd_list': acc_baseline_gcnsvd_list
 }
 
 
-filename = str(trials) + 'trials' + '_' + dataset + 'dataset' + '_' + str(percent_corruption_neighbors) + \
-    'percent_corruption_neighbors' + '_' + \
-    str(initial_num_labels) + 'initial_num_labels.pk'
-with open(os.path.join('results', filename), 'wb') as f:
+filename = str(trials) + '_trials' + '_' + dataset + 'dataset' + '_' + str(percent_corruption_neighbors) + \
+    '_percent_corruption_neighbors' + '_' + \
+    str(initial_num_labels) + '_initial_num_labels.pk'
+
+if not os.path.exists(result_path):
+    os.makedirs(result_path)
+
+with open(os.path.join(result_path, filename), 'wb') as f:
     pk.dump(to_store, f)
