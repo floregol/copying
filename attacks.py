@@ -6,15 +6,18 @@ import math
 from nettack.GCN import GCN
 from nettack.nettack import Nettack
 from nettack.utils import preprocess_graph
+from fgaattack.fga import FGA
+from fgaattack.gcn import GCN2
+
 
 def poison_adj_NETTACK_attack(seed, adj, labels, features_sparse, m, list_test_nodes, train_mask, val_mask):
 
     random.seed(seed)
     sizes = [16, labels.shape[1]]
     degrees = adj.A.sum(axis=1).flatten()
-    
+
     An = preprocess_graph(adj)
-    
+
     surrogate_model = GCN(sizes, An, features_sparse, with_relu=False, name="surrogate", gpu_id=0)
     split_train = np.argwhere(train_mask).reshape(-1)
     split_val = np.argwhere(val_mask).reshape(-1)
@@ -74,4 +77,34 @@ def poison_adj_DISCONNECTING_attack(seed, adj, m, list_test_nodes):
         attack_adj[n, :] = 0
         attack_adj[:, n] = 0
 
+    return sparse.csr_matrix(attack_adj), nodes_to_corrupt
+
+
+def poison_adj_fga_attack(seed, adj, labels, features_sparse, m, list_test_nodes, train_mask, val_mask):
+
+    random.seed(seed)
+    sizes = [16, labels.shape[1]]
+    degrees = adj.A.sum(axis=1).flatten()
+
+    An = preprocess_graph(adj)
+    flatten_labels = np.argwhere(labels)[:, 1].flatten()
+    device = 'cpu'
+    surrogate_model = GCN2(
+        nfeat=features_sparse.shape[1], nclass=flatten_labels.max().item() + 1, nhid=16, with_relu=False, device=device)
+    surrogate_model = surrogate_model.to(device)
+    split_train = np.argwhere(train_mask).reshape(-1)
+    split_val = np.argwhere(val_mask).reshape(-1)
+    surrogate_model.fit(features_sparse, An, flatten_labels, split_train)
+
+    nodes_to_corrupt = random.sample(list(list_test_nodes), m)
+
+    attack_adj = adj
+    for u in nodes_to_corrupt:
+
+        n_perturbations = int(degrees[u])  # How many perturbations to perform. Default: Degree of the node
+        fga = FGA(model=surrogate_model, nnodes=adj.shape[0], feature_shape=features_sparse.shape, device=device)
+        fga = fga.to(device)
+        fga.attack(
+            features_sparse, attack_adj, flatten_labels, split_train, target_node=0, n_perturbations=n_perturbations)
+        attack_adj = fga.modified_adj
     return sparse.csr_matrix(attack_adj), nodes_to_corrupt

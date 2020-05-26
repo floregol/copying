@@ -34,11 +34,13 @@ print('=========================================================================
 print('The datset is : ' + str(dataset))
 print('Number of attacked nodes : ' + str(num_attacked_nodes))
 print('Number of nodes for copying at each of attacked nodes : ' + str(new_positions))
-print('Dice attack is : ' + attack_name)
+print('Attack is : ' + attack_name)
 if attack_name == 'dice':
     print('Percentage of neighbours corrupted : ' + str(100 * percent_corruption_neighbors))
 elif attack_name == 'nettack':
     print('nettack')
+elif attack_name == 'fga':
+    print('fga')
 else:
     print('No specific attack, the attacked nodes are entirely disconnected')
 
@@ -50,7 +52,7 @@ features_sparse = preprocess_features(initial_features)
 feature_matrix = features_sparse.todense()
 
 
-test_split = StratifiedShuffleSplit(n_splits=trials, test_size=0.8, random_state=SEED)
+test_split = StratifiedShuffleSplit(n_splits=trials, test_size=0.5, random_state=SEED)
 test_split.get_n_splits(labels, labels)
 seed_list = np.random.randint(1, 1e6, trials)
 
