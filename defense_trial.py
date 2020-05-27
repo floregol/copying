@@ -45,7 +45,11 @@ def run_trial(train_index, test_index, seed, trial, labels, adj, features_sparse
                                                                  test_index, train_mask, val_mask)
     elif attack_name == 'fga':
         attacked_adj, attacked_nodes = poison_adj_fga_attack(seed, adj, labels, features_sparse, num_attacked_nodes,
-                                                                 test_index, train_mask, val_mask)
+                                                             test_index, train_mask, val_mask)
+    elif attack_name == 'ig':
+        attacked_adj, attacked_nodes = poison_adj_ig_attack(seed, adj, labels, features_sparse, num_attacked_nodes,
+                                                            test_index, train_mask, val_mask)
+
     else:
         attacked_adj, attacked_nodes = poison_adj_DISCONNECTING_attack(seed, adj, num_attacked_nodes, test_index)
 

@@ -41,6 +41,8 @@ elif attack_name == 'nettack':
     print('nettack')
 elif attack_name == 'fga':
     print('fga')
+elif attack_name == 'ig':
+    print('ig')
 else:
     print('No specific attack, the attacked nodes are entirely disconnected')
 
